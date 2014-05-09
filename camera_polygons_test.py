@@ -19,8 +19,11 @@ MOUSEBUTTON_RIGHT = 3
 class CameraScreenPlayground(object):
     """Draws a 1D screen of 2D space"""
 
-    camera_circle_width = 3
+    camera_circle_width = 5
     camera_circle_color = (0, 0, 0)
+
+    viewline_color = (0, 0, 0)
+    viewline_width = 1
 
     screen_line_width = 1
     screen_line_color = (50, 50, 50)
@@ -38,35 +41,61 @@ class CameraScreenPlayground(object):
         # Distance between camera and screen
         self.camera_to_screen = camera_to_screen
 
+        # Position of mouse, to draw a viewline to
+        self.mouse_pos = (0, 0)
+
         if self.camera is None:
             self.camera = (10, self.height / 2)
         if self.screen_size is None:
             self.screen_size = self.height / 8
 
+        # Records the colors on the screen, to draw the camera dot the color
+        # which the viewline hits.
+        self.screen_colors = [(0, 0, 0)] * (self.screen_size * 2 + 1)
+
         self.polygons = polygons
         if self.polygons is None:
             self.polygons = []
 
-    def is_on_screen(self, (x, y)):
+    @property
+    def max_screen_angle(self):
         adjacent = self.camera_to_screen
         opposite = self.screen_size
-        max_screen_angle = math.atan2(opposite, adjacent)
+        return math.atan2(opposite, adjacent)
 
+    def angle_to_point(self, (x, y)):
         camera_x, camera_y = self.camera
         adjacent = x - camera_x
         opposite = y - camera_y
-        angle_to_point = math.atan2(opposite, adjacent)
+        return math.atan2(opposite, adjacent)
 
-        return abs(angle_to_point) < max_screen_angle
+    def is_on_screen(self, point):
+        return abs(self.angle_to_point(point)) < self.max_screen_angle
+
+    def mouse_screen_index(self):
+        angle_to_mouse = self.angle_to_point(self.mouse_pos)
+        if abs(angle_to_mouse) >= self.max_screen_angle:
+            return None
+
+        height = self.camera_to_screen * math.tan(angle_to_mouse)
+        index = self.screen_size + height
+        return int(index)
 
     def render(self, surface):
-        self.draw_camera(surface)
         self.draw_screen(surface)
         self.draw_polygons(surface)
+        self.draw_viewline(surface)
+        self.draw_camera(surface)
         self.draw_screen_pixels(surface)
 
     def draw_camera(self, surface):
-        pygame.draw.circle(surface, self.camera_circle_color, self.camera,
+        mouse_screen_index = self.mouse_screen_index()
+        if mouse_screen_index is None:
+            color = self.camera_circle_color
+        else:
+            color = self.screen_colors[mouse_screen_index]
+
+        pygame.draw.circle(surface, color, self.camera,
                            self.camera_circle_width)
 
     def draw_screen(self, surface):
@@ -80,6 +109,10 @@ class CameraScreenPlayground(object):
     def draw_polygons(self, surface):
         for polygon in self.polygons:
             pygame.draw.polygon(surface, polygon.color, polygon.vertices)
+
+    def draw_viewline(self, surface):
+        pygame.draw.line(surface, self.viewline_color,
+                         self.camera, self.mouse_pos)
 
     def draw_screen_pixels(self, surface):
         camera_x, camera_y = self.camera
@@ -106,7 +139,13 @@ class CameraScreenPlayground(object):
             if polygons:
                 # Draw the polygon with a point closest to the camera
                 polygon = min(polygons, key=lambda p: dists[p])
-                surface.set_at((screen_x, screen_y), polygon.color)
+                color = polygon.color
+            else:
+                color = (0, 0, 0)
+
+            surface.set_at((screen_x, screen_y), color)
+            screen_index = screen_y - (camera_y - self.screen_size)
+            self.screen_colors[screen_index] = color
 
 
 class Sandbox(object):
@@ -150,6 +189,7 @@ class Sandbox(object):
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     os._exit(0)
+
                 elif event.type == pygame.MOUSEBUTTONUP:
                     if self.is_in_board(event.pos):
                         self.click_polygon.vertices.append(event.pos)
@@ -162,6 +202,11 @@ class Sandbox(object):
                             if event.button == MOUSEBUTTON_RIGHT:
                                 self.existing_polygons = all_polygons
                                 self.initialize_click_polygon()
+
+                elif event.type == pygame.MOUSEMOTION:
+                    mouse_x, mouse_y = event.pos
+                    self.camera_test.mouse_pos = (mouse_x - self.padding,
+                                                  mouse_y - self.padding)
 
             self.surface.fill((255, 255, 255))
             self.camera_test.render(self.surface)
